@@ -229,6 +229,26 @@ async def update_status(order_id: int, data: StatusUpdate, x_seller_key: str = H
 
     return {"id": order.id, "status": order.status}
 
+@app.get("/api/v1/orders/all")
+async def all_orders(x_seller_key: str = Header(""), db: AsyncSession = Depends(get_db)):
+    if x_seller_key != SELLER_KEY:
+        raise HTTPException(status_code=403, detail="Неверный ключ продавца")
+    result = await db.execute(select(Order).order_by(Order.created_at.desc()))
+    rows = result.scalars().all()
+    out = []
+    for o in rows:
+        items_r = await db.execute(select(OrderItem).where(OrderItem.order_id == o.id))
+        items = items_r.scalars().all()
+        out.append({
+            "id": o.id, "total": float(o.total), "status": o.status,
+            "buyer_id": o.buyer_id, "buyer_name": o.buyer_name,
+            "buyer_address": o.buyer_address, "buyer_phone": o.buyer_phone,
+            "promo_code": o.promo_code,
+            "created_at": o.created_at.isoformat() if o.created_at else None,
+            "items": [{"product_name": i.product_name, "quantity": i.quantity, "price": float(i.price)} for i in items]
+        })
+    return out
+
 @app.post("/api/v1/reviews/")
 async def create_review(data: ReviewCreate, db: AsyncSession = Depends(get_db)):
     p = await db.get(Product, data.product_id)
