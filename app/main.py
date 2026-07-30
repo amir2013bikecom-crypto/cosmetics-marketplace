@@ -170,6 +170,10 @@ async def on_shutdown():
 
 
 # ─── ENDPOINTS ──────────────────────────────────────────────────────
+@app.get("/")
+async def root():
+    return {"message": "Мир Косметики API", "status": "ok"}
+    
 @app.get("/health")
 async def health():
     return {"status": "ok"}
