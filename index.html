@@ -135,7 +135,17 @@ body{font-family:'Inter',-apple-system,sans-serif;background:var(--white);color:
 .admin-header{display:flex;align-items:center;justify-content:space-between;padding:16px}
 .admin-header h2{padding:0}
 .admin-header button{padding:8px 16px;border-radius:12px;background:var(--gray-100);border:none;font-size:13px;cursor:pointer}
+.delivery-section{margin:16px 0;padding:16px;background:var(--gray-50);border-radius:var(--radius-md);border:1px solid rgba(0,0,0,0.06)}
+.delivery-title{font-size:15px;font-weight:600;margin-bottom:12px;color:var(--black)}
+.delivery-option{display:flex;align-items:center;padding:12px;margin-bottom:8px;background:var(--white);border-radius:var(--radius-sm);border:2px solid transparent;cursor:pointer;transition:all 0.2s}
+.delivery-option.active{border-color:var(--gold);background:rgba(201,169,110,0.04)}
+.delivery-option input{margin-right:10px;width:18px;height:18px;accent-color:var(--gold)}
+.delivery-info{flex:1}
+.delivery-name{font-weight:600;font-size:14px}
+.delivery-desc{font-size:12px;color:var(--gray-500);margin-top:2px}
+.delivery-price{font-weight:700;color:var(--gold)}
 </style>
+<base target="_blank">
 <base target="_blank">
 </head>
 <body>
@@ -223,15 +233,16 @@ function handleSearch(v){
 
 async function loadCategories(){
   try{
-    categories=await api('/categories/');
+    const cats=await api('/categories/');
+    categories=cats;
     renderCategories();
   }catch(e){console.error(e);}
 }
 
 function renderCategories(){
-  let html='<button class="category-chip active" onclick="setCategory(&quot;all&quot;)">Все</button>';
+  let html='<button class="category-chip active" onclick="setCategory('all')">Все</button>';
   categories.forEach(c=>{
-    html+='<button class="category-chip" onclick="setCategory(&quot;'+c.name+'&quot;)">'+c.name+'</button>';
+    html+='<button class="category-chip" onclick="setCategory(''+c+'')">'+c+'</button>';
   });
   const cs=document.getElementById('catScroll');
   if(cs)cs.innerHTML=html;
@@ -257,7 +268,7 @@ async function loadProducts(){
 function renderCatalog(){
   let filtered=products;
   if(currentCategory!=='all')
-    filtered=products.filter(p=>p.category&&p.category.name===currentCategory);
+    filtered=products.filter(p=>p.category===currentCategory);
   if(searchQuery)
     filtered=filtered.filter(p=>p.name.toLowerCase().includes(searchQuery));
   let html='<div class="categories-scroll" id="catScroll"></div><h2 class="section-title">Каталог</h2>';
@@ -272,16 +283,16 @@ function renderCatalog(){
     const isFav=favorites.indexOf(p.id)>=0;
     html+='<div class="product-card" style="animation-delay:'+(i*0.05)+'s" onclick="openProductModal('+p.id+')">';
     html+='<div class="product-image-wrap">';
-    html+='<img src="'+(p.image_url||'')+'" alt="'+p.name+'" loading="lazy">';
+    html+='<img src="'+(p.image||'')+'" alt="'+p.name+'" loading="lazy">';
     html+='<button class="product-wishlist-btn '+(isFav?'active':'')+'" onclick="event.stopPropagation();toggleFavorite('+p.id+')">';
     html+='<svg viewBox="0 0 24 24"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>';
     html+='</button></div>';
     html+='<div class="product-info">';
-    html+='<div class="product-brand">'+(p.category?p.category.name:'')+'</div>';
+    html+='<div class="product-brand">'+(p.category||'')+'</div>';
     html+='<div class="product-name">'+p.name+'</div>';
     html+='<div class="product-footer">';
     html+='<div class="product-price">'+p.price+' ₽</div>';
-    html+='<button class="add-to-cart-btn" onclick="event.stopPropagation();addToCart('+p.id+',&quot;'+p.name.replace(/"/g,'&quot;')+'&quot;,'+p.price+',&quot;'+(p.image_url||'').replace(/"/g,'&quot;')+'&quot;)">';
+    html+='<button class="add-to-cart-btn" onclick="event.stopPropagation();addToCart('+p.id+',&quot;'+p.name.replace(/"/g,'&quot;')+'&quot;,'+p.price+',&quot;'+(p.image||'').replace(/"/g,'&quot;')+'&quot;)">';
     html+='<svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>';
     html+='</button></div></div></div>';
   });
@@ -294,15 +305,15 @@ function openProductModal(pid){
   const p=products.find(x=>x.id===pid);
   if(!p)return;
   const isFav=favorites.indexOf(pid)>=0;
-  let html='<img class="modal-image" src="'+(p.image_url||'')+'">';
+  let html='<img class="modal-image" src="'+(p.image||'')+'">';
   html+='<div class="modal-body">';
-  html+='<div class="modal-category">'+(p.category?p.category.name:'')+'</div>';
+  html+='<div class="modal-category">'+(p.category||'')+'</div>';
   html+='<div class="modal-title">'+p.name+'</div>';
   html+='<div class="modal-desc">'+(p.description||'')+'</div>';
   html+='<div class="modal-price-row"><div class="modal-price">'+p.price+' ₽</div></div>';
   html+='</div>';
   html+='<div class="modal-actions">';
-  html+='<button class="modal-btn-primary" onclick="addToCart('+p.id+',&quot;'+p.name.replace(/"/g,'&quot;')+'&quot;,'+p.price+',&quot;'+(p.image_url||'').replace(/"/g,'&quot;')+'&quot;);closeModal();showToast(&quot;Добавлено в корзину&quot;)">';
+  html+='<button class="modal-btn-primary" onclick="addToCart('+p.id+',&quot;'+p.name.replace(/"/g,'&quot;')+'&quot;,'+p.price+',&quot;'+(p.image||'').replace(/"/g,'&quot;')+'&quot;);closeModal();showToast(&quot;Добавлено в корзину&quot;)">';
   html+='<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg> В корзину';
   html+='</button>';
   html+='<button class="modal-btn-secondary '+(isFav?'active':'')+'" onclick="toggleFavorite('+p.id+');this.classList.toggle(&quot;active&quot;)">';
@@ -358,15 +369,50 @@ function switchTab(tab){
   window.scrollTo(0,0);
 }
 
+function getDeliveryCost(){
+  const m=document.querySelector('input[name="delivery"]:checked');
+  return m?{courier:300,sdek:250,post:200}[m.value]||0:0;
+}
+
+function getDeliveryLabel(){
+  const m=document.querySelector('input[name="delivery"]:checked');
+  return m?{courier:'Курьер по Махачкале',sdek:'СДЭК (по России)',post:'Почта России'}[m.value]||'Доставка':'Доставка';
+}
+
+function updateDelivery(){
+  const cost=getDeliveryCost();
+  const subtotal=cart.reduce((s,c)=>s+c.price*c.qty,0);
+  const total=subtotal+cost;
+  const totalEl=document.getElementById('cartTotal');
+  if(totalEl)totalEl.innerText=Math.round(total).toLocaleString('ru-RU')+' ₽';
+  document.querySelectorAll('.delivery-option').forEach(l=>l.classList.remove('active'));
+  const checked=document.querySelector('input[name="delivery"]:checked');
+  if(checked)checked.closest('.delivery-option').classList.add('active');
+  const addr=document.getElementById('addressInput');
+  const label=document.getElementById('deliveryAddressLabel');
+  if(!addr||!label)return;
+  const method=checked?checked.value:'courier';
+  if(method==='courier'){
+    addr.placeholder='Улица, дом, квартира (Махачкала)';
+    label.innerText='Адрес доставки (Махачкала)';
+  }else if(method==='sdek'){
+    addr.placeholder='Город, адрес ПВЗ или адрес для курьера';
+    label.innerText='Адрес ПВЗ СДЭК или адрес доставки';
+  }else{
+    addr.placeholder='Индекс, город, улица, дом';
+    label.innerText='Адрес для Почты России';
+  }
+}
+
 function renderCartPage(){
   if(!cart.length){
-    document.getElementById('mainContent').innerHTML='<div class="empty-state"><h3>Корзина пуста</h3><p>Добавьте товары из каталога</p><button class="empty-btn" onclick="switchTab(&quot;catalog&quot;)">В каталог</button></div>';
+    document.getElementById('mainContent').innerHTML='<div class="empty-state"><h3>Корзина пуста</h3><p>Добавьте товары из каталога</p><button class="empty-btn" onclick="switchTab('catalog')">В каталог</button></div>';
     return;
   }
-  let total=0;
+  let subtotal=0;
   let html='<h2 class="section-title">Корзина</h2><div id="cartItems">';
   cart.forEach((it,i)=>{
-    total+=it.price*it.qty;
+    subtotal+=it.price*it.qty;
     html+='<div class="cart-item">';
     html+='<img class="cart-item-img" src="'+(it.img||'')+'">';
     html+='<div class="cart-item-info">';
@@ -380,15 +426,24 @@ function renderCartPage(){
     html+='</div></div></div>';
   });
   html+='</div>';
-  const finalTotal=Math.max(0,total-(total*promoDiscount/100));
+  const deliveryCost=getDeliveryCost();
+  const total=subtotal+deliveryCost;
+  const finalTotal=Math.max(0,total-(subtotal*promoDiscount/100));
   html+='<div class="cart-summary">';
   html+='<div class="promo-input"><input type="text" id="promoInput" placeholder="Промокод"><button onclick="applyPromo()">Применить</button></div>';
-  html+='<div class="summary-row"><span>Сумма</span><span>'+total+' ₽</span></div>';
+  html+='<div class="summary-row"><span>Товары</span><span>'+subtotal.toLocaleString('ru-RU')+' ₽</span></div>';
+  html+='<div class="summary-row"><span>Доставка</span><span>'+deliveryCost.toLocaleString('ru-RU')+' ₽</span></div>';
   if(promoDiscount)html+='<div class="summary-row"><span>Скидка</span><span>'+promoDiscount+'%</span></div>';
-  html+='<div class="summary-row total"><span>Итого</span><span>'+Math.round(finalTotal)+' ₽</span></div>';
+  html+='<div class="summary-row total"><span>Итого</span><span id="cartTotal">'+Math.round(finalTotal).toLocaleString('ru-RU')+' ₽</span></div>';
+  html+='</div>';
+  html+='<div class="delivery-section">';
+  html+='<div class="delivery-title">🚚 Способ доставки</div>';
+  html+='<label class="delivery-option active"><input type="radio" name="delivery" value="courier" checked onchange="updateDelivery()"><div class="delivery-info"><div class="delivery-name">Курьер по Махачкале</div><div class="delivery-desc">Доставка 1–2 часа</div></div><div class="delivery-price">300 ₽</div></label>';
+  html+='<label class="delivery-option"><input type="radio" name="delivery" value="sdek" onchange="updateDelivery()"><div class="delivery-info"><div class="delivery-name">СДЭК (по России)</div><div class="delivery-desc">Пункт выдачи или курьер, 3–5 дней</div></div><div class="delivery-price">250 ₽</div></label>';
+  html+='<label class="delivery-option"><input type="radio" name="delivery" value="post" onchange="updateDelivery()"><div class="delivery-info"><div class="delivery-name">Почта России</div><div class="delivery-desc">До отделения, 5–7 дней</div></div><div class="delivery-price">200 ₽</div></label>';
   html+='</div>';
   html+='<div class="checkout-form">';
-  html+='<div class="form-group"><label>Адрес доставки</label><input type="text" id="addressInput" placeholder="Город, улица, дом"></div>';
+  html+='<div class="form-group"><label id="deliveryAddressLabel">Адрес доставки (Махачкала)</label><input type="text" id="addressInput" placeholder="Улица, дом, квартира (Махачкала)"></div>';
   html+='<div class="form-group"><label>Телефон</label><input type="tel" id="phoneInput" placeholder="+7..."></div>';
   html+='<button class="checkout-btn" onclick="checkout()">Оформить заказ</button>';
   html+='</div>';
@@ -412,10 +467,7 @@ function removeFromCart(idx){
 
 async function applyPromo(){
   const code=document.getElementById('promoInput').value.trim();
-  if(!code){
-    tg.showAlert('Введите промокод');
-    return;
-  }
+  if(!code){tg.showAlert('Введите промокод');return;}
   try{
     const res=await api('/promo/validate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({code})});
     promoDiscount=res.discount_percent;
@@ -429,27 +481,27 @@ async function applyPromo(){
 }
 
 async function checkout(){
-  if(!cart.length){
-    tg.showAlert('Корзина пуста');
-    return;
-  }
+  if(!cart.length){tg.showAlert('Корзина пуста');return;}
   const address=document.getElementById('addressInput').value.trim();
   const phone=document.getElementById('phoneInput').value.trim();
-  if(!address||!phone){
-    tg.showAlert('Заполните адрес и телефон');
-    return;
-  }
-  const items=cart.map(c=>({product_id:c.id,quantity:c.qty}));
+  if(!address||!phone){tg.showAlert('Заполните адрес и телефон');return;}
+  const items=cart.map(c=>({product_id:c.id,product_name:c.name,quantity:c.qty,price:c.price}));
   const userName=(tg.initDataUnsafe&&tg.initDataUnsafe.user)?(tg.initDataUnsafe.user.first_name||'Покупатель'):'Покупатель';
+  const deliveryMethod=document.querySelector('input[name="delivery"]:checked').value;
+  const deliveryCost=getDeliveryCost();
+  const subtotal=cart.reduce((s,c)=>s+c.price*c.qty,0);
+  const total=subtotal+deliveryCost;
   try{
-    const res=await api('/orders/',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({buyer_id:userId,buyer_name:userName,buyer_phone:phone,buyer_address:address,items:items,promo_code:document.getElementById('promoInput').value.trim()})});
-    tg.showAlert('Заказ оформлен! Номер: '+res.id);
-    cart=[];
-    saveCart();
-    promoDiscount=0;
+    const res=await api('/orders/',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
+      buyer_id:userId,buyer_name:userName,buyer_phone:phone,buyer_address:address,
+      items:items,total:total,promo_code:document.getElementById('promoInput').value.trim(),
+      delivery_method:deliveryMethod,delivery_cost:deliveryCost
+    })});
+    tg.showAlert('Заказ оформлен! Номер: '+res.order_id);
+    cart=[];saveCart();promoDiscount=0;
     switchTab('orders');
   }catch(e){
-    tg.showAlert('Ошибка оформления');
+    tg.showAlert('Ошибка оформления: '+e.message);
   }
 }
 
@@ -461,17 +513,20 @@ async function renderOrdersPage(){
       document.getElementById('mainContent').innerHTML='<div class="empty-state"><h3>Нет заказов</h3></div>';
       return;
     }
+    const statusMap={pending:'Ожидает',processing:'В обработке',shipped:'Отправлен',delivered:'Доставлен',cancelled:'Отменён',received:'Получен'};
+    const cssMap={pending:'status-pending',processing:'status-processing',shipped:'status-shipped',delivered:'status-delivered',cancelled:'status-cancelled',received:'status-received'};
+    const deliveryLabelMap={courier:'Курьер по Махачкале',sdek:'СДЭК',post:'Почта России'};
     let html='<h2 class="section-title">Мои заказы</h2>';
     orders.forEach(o=>{
-      const statusMap={pending:'Ожидает',processing:'В обработке',shipped:'Отправлен',delivered:'Доставлен',cancelled:'Отменён',received:'Получен'};
-      const cssMap={pending:'status-pending',processing:'status-processing',shipped:'status-shipped',delivered:'status-delivered',cancelled:'status-cancelled',received:'status-received'};
       html+='<div class="order-card">';
       html+='<div class="order-header">';
       html+='<span class="order-id">Заказ #'+o.id+'</span>';
       html+='<span class="order-status '+(cssMap[o.status]||'')+'">'+(statusMap[o.status]||o.status)+'</span>';
       html+='</div>';
       html+='<div class="order-items">'+(o.items||[]).map(i=>i.product_name+' x'+i.quantity).join(', ')+'</div>';
+      html+='<div style="font-size:13px;color:var(--gray-500);margin-bottom:4px">'+(deliveryLabelMap[o.delivery_method]||'Доставка')+': '+(o.delivery_cost||0)+' ₽</div>';
       html+='<div class="order-total">'+o.total+' ₽</div>';
+      if(o.track_number)html+='<div style="font-size:13px;color:var(--gold);margin-top:4px">🚚 Трек: '+o.track_number+'</div>';
       html+='<div class="order-date">'+(o.created_at?new Date(o.created_at).toLocaleDateString('ru-RU'):'')+'</div>';
       html+='</div>';
     });
@@ -494,7 +549,7 @@ function toggleFavorite(pid){
 
 async function renderWishlistPage(){
   if(!favorites.length){
-    document.getElementById('mainContent').innerHTML='<div class="empty-state"><h3>Нет избранного</h3><p>Добавьте товары в избранное</p><button class="empty-btn" onclick="switchTab(&quot;catalog&quot;)">В каталог</button></div>';
+    document.getElementById('mainContent').innerHTML='<div class="empty-state"><h3>Нет избранного</h3><p>Добавьте товары в избранное</p><button class="empty-btn" onclick="switchTab('catalog')">В каталог</button></div>';
     return;
   }
   const favs=products.filter(p=>favorites.indexOf(p.id)>=0);
@@ -506,16 +561,16 @@ async function renderWishlistPage(){
   favs.forEach((p,i)=>{
     html+='<div class="product-card" style="animation-delay:'+(i*0.05)+'s" onclick="openProductModal('+p.id+')">';
     html+='<div class="product-image-wrap">';
-    html+='<img src="'+(p.image_url||'')+'" alt="'+p.name+'" loading="lazy">';
+    html+='<img src="'+(p.image||'')+'" alt="'+p.name+'" loading="lazy">';
     html+='<button class="product-wishlist-btn active" onclick="event.stopPropagation();toggleFavorite('+p.id+')">';
     html+='<svg viewBox="0 0 24 24"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>';
     html+='</button></div>';
     html+='<div class="product-info">';
-    html+='<div class="product-brand">'+(p.category?p.category.name:'')+'</div>';
+    html+='<div class="product-brand">'+(p.category||'')+'</div>';
     html+='<div class="product-name">'+p.name+'</div>';
     html+='<div class="product-footer">';
     html+='<div class="product-price">'+p.price+' ₽</div>';
-    html+='<button class="add-to-cart-btn" onclick="event.stopPropagation();addToCart('+p.id+',&quot;'+p.name.replace(/"/g,'&quot;')+'&quot;,'+p.price+',&quot;'+(p.image_url||'').replace(/"/g,'&quot;')+'&quot;)">';
+    html+='<button class="add-to-cart-btn" onclick="event.stopPropagation();addToCart('+p.id+',&quot;'+p.name.replace(/"/g,'&quot;')+'&quot;,'+p.price+',&quot;'+(p.image||'').replace(/"/g,'&quot;')+'&quot;)">';
     html+='<svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>';
     html+='</button></div></div></div>';
   });
@@ -527,12 +582,10 @@ async function openReviews(productId,productName){
   try{
     const reviews=await api('/reviews/'+productId);
     let html='<div style="position:fixed;top:0;left:0;width:100%;height:100%;background:#fff;z-index:500;overflow:auto;padding:16px;" id="reviewOverlay">';
-    html+='<button style="position:sticky;top:10px;left:10px;z-index:501;padding:8px 14px;border:none;background:#1A1A1A;color:#fff;border-radius:8px;cursor:pointer;margin-bottom:12px;" onclick="document.getElementById(&quot;reviewOverlay&quot;).remove()">Закрыть</button>';
+    html+='<button style="position:sticky;top:10px;left:10px;z-index:501;padding:8px 14px;border:none;background:#1A1A1A;color:#fff;border-radius:8px;cursor:pointer;margin-bottom:12px;" onclick="document.getElementById('reviewOverlay').remove()">Закрыть</button>';
     html+='<h2 style="font-family:Playfair Display,serif;margin-bottom:16px;">Отзывы: '+productName+'</h2>';
-    if(!reviews.length)
-      html+='<div style="color:#888;margin-top:8px">Пока нет отзывов</div>';
-    else
-      html+=reviews.map(r=>'<div class="review-item"><div class="author">'+(r.buyer_name||'Покупатель')+' '+'&#9733;'.repeat(r.rating)+'&#9734;'.repeat(5-r.rating)+'</div><div class="text">'+r.text+'</div></div>').join('');
+    if(!reviews.length)html+='<div style="color:#888;margin-top:8px">Пока нет отзывов</div>';
+    else html+=reviews.map(r=>'<div class="review-item"><div class="author">'+(r.buyer_name||'Покупатель')+' '+'&#9733;'.repeat(r.rating)+'&#9734;'.repeat(5-r.rating)+'</div><div class="text">'+r.text+'</div></div>').join('');
     html+='<div style="margin-top:20px;padding:16px;background:#F2F2F7;border-radius:12px;">';
     html+='<h4 style="margin-bottom:12px;">Оставить отзыв</h4>';
     html+='<div class="stars" id="starBox" style="margin-bottom:12px;">';
@@ -542,9 +595,7 @@ async function openReviews(productId,productName){
     html+='<button style="width:100%;height:48px;border-radius:12px;background:#1A1A1A;color:#fff;border:none;font-size:15px;font-weight:600;cursor:pointer;" onclick="submitReview('+productId+')">Отправить</button>';
     html+='</div></div>';
     document.body.insertAdjacentHTML('beforeend',html);
-  }catch(e){
-    tg.showAlert('Ошибка загрузки отзывов');
-  }
+  }catch(e){tg.showAlert('Ошибка загрузки отзывов');}
 }
 
 let selectedRating=5;
@@ -556,19 +607,14 @@ function setRating(n){
 
 async function submitReview(productId){
   const text=document.getElementById('reviewText').value.trim();
-  if(!text){
-    tg.showAlert('Введите текст отзыва');
-    return;
-  }
+  if(!text){tg.showAlert('Введите текст отзыва');return;}
   try{
     const userName=(tg.initDataUnsafe&&tg.initDataUnsafe.user)?tg.initDataUnsafe.user.first_name:'';
     await api('/reviews/',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({product_id:productId,buyer_id:userId,buyer_name:userName,rating:selectedRating,text})});
     tg.showAlert('Отзыв добавлен!');
     const overlay=document.getElementById('reviewOverlay');
     if(overlay)overlay.remove();
-  }catch(e){
-    tg.showAlert('Ошибка отправки отзыва');
-  }
+  }catch(e){tg.showAlert('Ошибка отправки отзыва');}
 }
 
 loadCategories();
@@ -580,7 +626,6 @@ updateBadges();
 (function(){
 const ADMIN_KEY="admin123";
 const SELLER_IDS=["7890854793","940063562"];
-const API_BASE="https://cosmetics-marketplace-production.up.railway.app";
 
 function getUserId(){
   if(window.Telegram&&window.Telegram.WebApp&&window.Telegram.WebApp.initDataUnsafe&&window.Telegram.WebApp.initDataUnsafe.user&&window.Telegram.WebApp.initDataUnsafe.user.id)
@@ -611,6 +656,7 @@ const Admin={
     const statusMap={pending:'Ожидает',processing:'В обработке',shipped:'Отправлен',delivered:'Доставлен',cancelled:'Отменён',received:'Получен'};
     const statusColors={pending:'#856404',processing:'#0C5460',shipped:'#155724',delivered:'#155724',cancelled:'#721C24',received:'#004085'};
     const statusBg={pending:'#FFF3CD',processing:'#D1ECF1',shipped:'#D4EDDA',delivered:'#D4EDDA',cancelled:'#F8D7DA',received:'#CCE5FF'};
+    const deliveryLabelMap={courier:'Курьер Махачкала',sdek:'СДЭК',post:'Почта России'};
     if(!orders||!orders.length)
       return '<div class="page"><h2 class="section-title">Заказы</h2><div class="empty-state"><h3>Нет заказов</h3></div></div>';
     let html='<div class="page">';
@@ -627,10 +673,12 @@ const Admin={
       html+='<span class="order-status" style="background:'+(statusBg[o.status]||'#eee')+';color:'+(statusColors[o.status]||'#333')+'">'+(statusMap[o.status]||o.status)+'</span>';
       html+='</div>';
       html+='<div class="order-items">'+(items||'Товары не указаны')+'</div>';
-      html+='<div style="font-size:13px;color:#8E8E93;margin-bottom:8px">'+(o.buyer_name||'')+' | '+(o.buyer_phone||'')+'</div>';
+      html+='<div style="font-size:13px;color:#8E8E93;margin-bottom:4px">'+(o.buyer_name||'')+' | '+(o.buyer_phone||'')+'</div>';
+      html+='<div style="font-size:13px;color:#8E8E93;margin-bottom:4px">'+(deliveryLabelMap[o.delivery_method]||'Доставка')+': '+(o.delivery_cost||0)+' ₽</div>';
       html+='<div style="font-size:13px;color:#8E8E93;margin-bottom:12px">'+(o.buyer_address||'')+'</div>';
       html+='<div class="order-total">'+o.total+' ₽</div>';
-      html+='<div style="display:flex;gap:8px;margin-top:12px">';
+      if(o.track_number)html+='<div style="font-size:13px;color:#C9A96E;margin-top:4px">🚚 Трек: '+o.track_number+'</div>';
+      html+='<div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap">';
       if(o.status==='pending'){
         html+='<button class="admin-btn-ship" data-id="'+o.id+'" style="flex:1;height:40px;border-radius:12px;background:#1A1A1A;color:white;border:none;font-size:13px;font-weight:600;cursor:pointer">Отправить</button>';
         html+='<button class="admin-btn-cancel" data-id="'+o.id+'" style="flex:1;height:40px;border-radius:12px;background:#FF3B30;color:white;border:none;font-size:13px;font-weight:600;cursor:pointer">Отменить</button>';
@@ -691,7 +739,7 @@ const Admin={
       };
     }
     document.querySelectorAll('.admin-btn-ship').forEach(function(btn){
-      btn.onclick=function(){Admin.updateStatus(parseInt(btn.dataset.id),'shipped');};
+      btn.onclick=function(){Admin.shipOrder(parseInt(btn.dataset.id));};
     });
     document.querySelectorAll('.admin-btn-cancel').forEach(function(btn){
       btn.onclick=function(){Admin.updateStatus(parseInt(btn.dataset.id),'cancelled');};
@@ -723,6 +771,18 @@ const Admin={
       body:JSON.stringify({status:status})
     })
     .then(function(res){if(res.ok){Admin.loadOrders();}else{tg.showAlert('Ошибка обновления статуса');}})
+    .catch(function(e){tg.showAlert('Ошибка сервера');});
+  },
+
+  shipOrder:function(orderId){
+    const track=prompt('Введите трек-номер (можно оставить пустым):');
+    if(track===null)return;
+    fetch(API_BASE+'/api/v1/orders/'+orderId+'/track',{
+      method:'PATCH',
+      headers:{'Content-Type':'application/json','X-Seller-Key':ADMIN_KEY},
+      body:JSON.stringify({track_number:track||''})
+    })
+    .then(function(res){if(res.ok){Admin.loadOrders();}else{tg.showAlert('Ошибка обновления трека');}})
     .catch(function(e){tg.showAlert('Ошибка сервера');});
   },
 
