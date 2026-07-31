@@ -159,7 +159,19 @@ async def start_bot():
 @app.on_event("startup")
 async def on_startup():
     await init_db()
-    await start_bot()
+    
+    # Автоматический seed если товаров нет
+    async with async_session() as session:
+        from sqlalchemy import select
+        from app.models import Product  # или как у тебя модель товара называется
+        
+        result = await session.execute(select(Product))
+        products = result.scalars().all()
+        
+        if not products:
+            await seed_products(session)
+            await session.commit()
+            print("✅ Товары автоматически добавлены при старте")
 
 
 @app.on_event("shutdown")
