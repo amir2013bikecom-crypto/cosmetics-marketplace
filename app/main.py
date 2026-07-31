@@ -128,7 +128,7 @@ class StatusUpdate(BaseModel):
         return v
 
 class TrackUpdate(BaseModel):
-    track_number: str = Field(..., min_length=3)
+    track_number: str = Field(..., min_length=1)
 
 class ReviewCreate(BaseModel):
     product_id: int
@@ -209,6 +209,11 @@ async def get_products(session: AsyncSession = Depends(get_db)):
     return [{"id": p.id, "name": p.name, "category": p.category, "price": p.price,
              "old_price": p.old_price, "image": p.image, "description": p.description,
              "rating": p.rating, "reviews_count": p.reviews_count} for p in products]
+
+@app.get("/api/v1/categories")
+async def get_categories(session: AsyncSession = Depends(get_db)):
+    result = await session.execute(select(Product.category).distinct())
+    return [c[0] for c in result.all() if c[0]]
 
 @app.post("/api/v1/orders")
 async def create_order(order: OrderCreate, session: AsyncSession = Depends(get_db)):
@@ -346,7 +351,6 @@ async def seed_data(session: AsyncSession = Depends(get_db)):
         return {"message": "Already seeded"}
 
     products = [
-        # Уход за лицом
         Product(name="Гидрофильное масло", category="Уход за лицом", price=890, old_price=1200,
                 image="https://images.unsplash.com/photo-1620916566398-39f1143ab7be?w=400",
                 description="Глубокое очищение кожи", rating=4.8, reviews_count=124),
@@ -365,8 +369,6 @@ async def seed_data(session: AsyncSession = Depends(get_db)):
         Product(name="Мицеллярная вода", category="Уход за лицом", price=490, old_price=650,
                 image="https://images.unsplash.com/photo-1556228578-0d85b1a4d571?w=400",
                 description="Мягкое очищение без смывания", rating=4.7, reviews_count=312),
-
-        # Макияж
         Product(name="Матовая помада", category="Макияж", price=650, old_price=890,
                 image="https://images.unsplash.com/photo-1586495777744-4413f21062fa?w=400",
                 description="Стойкий цвет на 12 часов", rating=4.7, reviews_count=256),
@@ -385,8 +387,6 @@ async def seed_data(session: AsyncSession = Depends(get_db)):
         Product(name="Хайлайтер", category="Макияж", price=790, old_price=990,
                 image="https://images.unsplash.com/photo-1596704017254-9b121068fb31?w=400",
                 description="Сияние кожи", rating=4.8, reviews_count=167),
-
-        # Уход за волосами
         Product(name="Восстанавливающий шампунь", category="Уход за волосами", price=890, old_price=1100,
                 image="https://images.unsplash.com/photo-1527799820374-dcf8d9d4a388?w=400",
                 description="Для сухих волос", rating=4.6, reviews_count=134),
@@ -399,8 +399,6 @@ async def seed_data(session: AsyncSession = Depends(get_db)):
         Product(name="Термозащитный спрей", category="Уход за волосами", price=550, old_price=720,
                 image="https://images.unsplash.com/photo-1527799820374-dcf8d9d4a388?w=400",
                 description="Защита при укладке", rating=4.4, reviews_count=89),
-
-        # Парфюмерия
         Product(name="Парфюм Floral", category="Парфюмерия", price=3490, old_price=4200,
                 image="https://images.unsplash.com/photo-1541643600914-78b084683601?w=400",
                 description="Нежный цветочный аромат", rating=4.9, reviews_count=245),
@@ -413,8 +411,6 @@ async def seed_data(session: AsyncSession = Depends(get_db)):
         Product(name="Масляные духи", category="Парфюмерия", price=1890, old_price=2400,
                 image="https://images.unsplash.com/photo-1541643600914-78b084683601?w=400",
                 description="Стойкий восточный аромат", rating=4.8, reviews_count=112),
-
-        # Уход за телом
         Product(name="Скраб для тела", category="Уход за телом", price=690, old_price=850,
                 image="https://images.unsplash.com/photo-1556228578-0d85b1a4d571?w=400",
                 description="Кофейный скраб", rating=4.6, reviews_count=112),
@@ -432,10 +428,6 @@ async def seed_data(session: AsyncSession = Depends(get_db)):
                 description="48 часов защиты", rating=4.4, reviews_count=198),
     ]
 
-    for p in products:
-        session.add(p)
-    await session.commit()
-    return {"message": f"Seeded {len(products)} products"}
     for p in products:
         session.add(p)
     await session.commit()
