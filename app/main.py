@@ -25,7 +25,7 @@ WEBHOOK_URL = os.getenv("WEBHOOK_URL", "")
 SELLER_IDS = [int(x.strip()) for x in os.getenv("SELLER_IDS", "").split(",") if x.strip()]
 SELLER_API_KEY = os.getenv("SELLER_API_KEY", "")
 FRONTEND_URL = os.getenv("FRONTEND_URL", "")
-WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET", "")  # Для проверки подписи webhook
+WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET", "")
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
@@ -63,6 +63,9 @@ class Order(Base):
     buyer_address = Column(Text, nullable=True)
     status = Column(String, default="pending")
     total = Column(Float, default=0.0)
+    delivery_method = Column(String, default="courier")
+    delivery_cost = Column(Float, default=0.0)
+    track_number = Column(String, nullable=True)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     items = relationship("OrderItem", lazy="selectin")
 
@@ -104,6 +107,8 @@ class OrderCreate(BaseModel):
     buyer_address: Optional[str] = ""
     items: List[OrderItemIn]
     total: float = Field(..., ge=0)
+    delivery_method: Optional[str] = "courier"
+    delivery_cost: Optional[float] = 0.0
 
     @validator("buyer_phone")
     def validate_phone(cls, v):
@@ -121,6 +126,9 @@ class StatusUpdate(BaseModel):
         if v not in VALID_STATUSES:
             raise ValueError(f"Статус должен быть одним из: {VALID_STATUSES}")
         return v
+
+class TrackUpdate(BaseModel):
+    track_number: str = Field(..., min_length=3)
 
 class ReviewCreate(BaseModel):
     product_id: int
@@ -169,7 +177,6 @@ async def lifespan(app: FastAPI):
 # ─── APP ────────────────────────────────────────────────────────────
 app = FastAPI(title="Мир Косметики API", lifespan=lifespan)
 
-# CORS: укажи конкретные домены в продакшене!
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -178,7 +185,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-app.add_middleware(TrustedHostMiddleware, allowed_hosts=["*"])  # Укажи свой домен
+app.add_middleware(TrustedHostMiddleware, allowed_hosts=["*"])
 
 # ─── AUTH DEPENDENCY ────────────────────────────────────────────────
 async def verify_seller(x_seller_key: Optional[str] = Header(None)):
@@ -208,7 +215,9 @@ async def create_order(order: OrderCreate, session: AsyncSession = Depends(get_d
     db_order = Order(
         buyer_id=order.buyer_id, buyer_name=order.buyer_name,
         buyer_phone=order.buyer_phone, buyer_address=order.buyer_address,
-        total=order.total, status="pending"
+        total=order.total, status="pending",
+        delivery_method=order.delivery_method,
+        delivery_cost=order.delivery_cost
     )
     session.add(db_order)
     await session.flush()
@@ -233,6 +242,9 @@ async def get_orders(buyer_id: str, session: AsyncSession = Depends(get_db)):
         "id": o.id, "buyer_id": o.buyer_id, "buyer_name": o.buyer_name,
         "buyer_phone": o.buyer_phone, "buyer_address": o.buyer_address,
         "status": o.status, "total": o.total,
+        "delivery_method": o.delivery_method,
+        "delivery_cost": o.delivery_cost,
+        "track_number": o.track_number,
         "created_at": o.created_at.isoformat() if o.created_at else None,
         "items": [{"product_id": i.product_id, "product_name": i.product_name,
                    "quantity": i.quantity, "price": i.price} for i in o.items]
@@ -251,6 +263,9 @@ async def admin_orders(
         "id": o.id, "buyer_id": o.buyer_id, "buyer_name": o.buyer_name,
         "buyer_phone": o.buyer_phone, "buyer_address": o.buyer_address,
         "status": o.status, "total": o.total,
+        "delivery_method": o.delivery_method,
+        "delivery_cost": o.delivery_cost,
+        "track_number": o.track_number,
         "created_at": o.created_at.isoformat() if o.created_at else None,
         "items": [{"product_id": i.product_id, "product_name": i.product_name,
                    "quantity": i.quantity, "price": i.price} for i in o.items]
@@ -271,6 +286,23 @@ async def update_status(
     await session.commit()
     logger.info(f"Order #{order_id} status updated to {update.status}")
     return {"success": True, "order_id": order.id, "status": order.status}
+
+@app.patch("/api/v1/orders/{order_id}/track")
+async def update_track(
+    order_id: int,
+    update: TrackUpdate,
+    session: AsyncSession = Depends(get_db),
+    _: str = Depends(verify_seller)
+):
+    result = await session.execute(select(Order).where(Order.id == order_id))
+    order = result.scalar_one_or_none()
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+    order.track_number = update.track_number
+    order.status = "shipped"
+    await session.commit()
+    logger.info(f"Order #{order_id} track updated: {update.track_number}")
+    return {"success": True, "order_id": order.id, "track_number": order.track_number}
 
 @app.post("/api/v1/reviews")
 async def create_review(review: ReviewCreate, session: AsyncSession = Depends(get_db)):
@@ -298,13 +330,10 @@ async def get_reviews(product_id: int, session: AsyncSession = Depends(get_db)):
 async def telegram_webhook(request: Request):
     if not bot_app:
         raise HTTPException(status_code=503, detail="Bot not initialized")
-
-    # Проверка секрета webhook (если настроен)
     if WEBHOOK_SECRET:
         secret = request.headers.get("X-Telegram-Bot-Api-Secret-Token")
         if secret != WEBHOOK_SECRET:
             raise HTTPException(status_code=403, detail="Invalid webhook secret")
-
     data = await request.json()
     update = Update.de_json(data, bot_app.bot)
     await bot_app.process_update(update)
@@ -317,75 +346,16 @@ async def seed_data(session: AsyncSession = Depends(get_db)):
         return {"message": "Already seeded"}
     
     products = [
-        # Уход за лицом
         Product(name="Гидрофильное масло", category="Уход за лицом", price=890, old_price=1200,
                 image="https://images.unsplash.com/photo-1620916566398-39f1143ab7be?w=400",
                 description="Глубокое очищение кожи", rating=4.8, reviews_count=124),
         Product(name="Сыворотка с витамином C", category="Уход за лицом", price=1290, old_price=1590,
                 image="https://images.unsplash.com/photo-1608248543803-ba4f8c70ae0b?w=400",
                 description="Осветление и выравнивание тона", rating=4.9, reviews_count=89),
-        Product(name="Крем для лица увлажняющий", category="Уход за лицом", price=750, old_price=950,
-                image="https://images.unsplash.com/photo-1570194065650-d99fb4b38b15?w=400",
-                description="24 часа увлажнения", rating=4.7, reviews_count=156),
-        Product(name="Тоник для лица", category="Уход за лицом", price=450, old_price=600,
-                image="https://images.unsplash.com/photo-1601049541289-9b1b7bbbfe19?w=400",
-                description="Сужение пор и баланс pH", rating=4.6, reviews_count=78),
-        
-        # Макияж
         Product(name="Матовая помада", category="Макияж", price=650, old_price=890,
                 image="https://images.unsplash.com/photo-1586495777744-4413f21062fa?w=400",
                 description="Стойкий цвет на 12 часов", rating=4.7, reviews_count=256),
-        Product(name="Тушь для ресниц", category="Макияж", price=890, old_price=1100,
-                image="https://images.unsplash.com/photo-1631214524115-6f8eb1beb6b5?w=400",
-                description="Объём и удлинение", rating=4.8, reviews_count=312),
-        Product(name="Тональный кушон", category="Макияж", price=1590, old_price=1990,
-                image="https://images.unsplash.com/photo-1596462502278-27bfdc403348?w=400",
-                description="Лёгкое покрытие", rating=4.5, reviews_count=89),
-        Product(name="Палетка теней", category="Макияж", price=1290, old_price=1590,
-                image="https://images.unsplash.com/photo-1596704017254-9b121068fb31?w=400",
-                description="12 оттенков нюд", rating=4.9, reviews_count=178),
-        
-        # Уход за волосами
-        Product(name="Восстанавливающий шампунь", category="Уход за волосами", price=890, old_price=1100,
-                image="https://images.unsplash.com/photo-1527799820374-dcf8d9d4a388?w=400",
-                description="Для сухих волос", rating=4.6, reviews_count=134),
-        Product(name="Маска для волос", category="Уход за волосами", price=1150, old_price=1390,
-                image="https://images.unsplash.com/photo-1522337360788-8b13dee7a37e?w=400",
-                description="Глубокое питание", rating=4.8, reviews_count=98),
-        Product(name="Масло для волос", category="Уход за волосами", price=690, old_price=850,
-                image="https://images.unsplash.com/photo-1608248543803-ba4f8c70ae0b?w=400",
-                description="Блеск и защита кончиков", rating=4.5, reviews_count=67),
-        
-        # Парфюмерия
-        Product(name="Парфюм Floral", category="Парфюмерия", price=3490, old_price=4200,
-                image="https://images.unsplash.com/photo-1541643600914-78b084683601?w=400",
-                description="Нежный цветочный аромат", rating=4.9, reviews_count=245),
-        Product(name="Парфюм Woody", category="Парфюмерия", price=4290, old_price=5200,
-                image="https://images.unsplash.com/photo-1594035910387-fea47794261f?w=400",
-                description="Древесные ноты", rating=4.8, reviews_count=189),
-        Product(name="Туалетная вода Fresh", category="Парфюмерия", price=2590, old_price=3100,
-                image="https://images.unsplash.com/photo-1596462502278-27bfdc403348?w=400",
-                description="Свежий цитрусовый аромат", rating=4.7, reviews_count=156),
-        
-        # Уход за телом
-        Product(name="Скраб для тела", category="Уход за телом", price=690, old_price=850,
-                image="https://images.unsplash.com/photo-1556228578-0d85b1a4d571?w=400",
-                description="Кофейный скраб", rating=4.6, reviews_count=112),
-        Product(name="Крем для рук", category="Уход за телом", price=450, old_price=550,
-                image="https://images.unsplash.com/photo-1596755389378-c31d21fd1273?w=400",
-                description="Питательный крем", rating=4.5, reviews_count=89),
-        Product(name="Гель для душа", category="Уход за телом", price=590, old_price=720,
-                image="https://images.unsplash.com/photo-1608248543803-ba4f8c70ae0b?w=400",
-                description="Увлажнение и аромат", rating=4.7, reviews_count=134),
-        Product(name="Масло для тела", category="Уход за телом", price=790, old_price=950,
-                image="https://images.unsplash.com/photo-1601049541289-9b1b7bbbfe19?w=400",
-                description="Питание после душа", rating=4.8, reviews_count=78),
     ]
-    
-    for p in products:
-        session.add(p)
-    await session.commit()
-    return {"message": f"Seeded {len(products)} products"}
     for p in products:
         session.add(p)
     await session.commit()
