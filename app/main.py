@@ -172,7 +172,7 @@ app = FastAPI(title="Мир Косметики API", lifespan=lifespan)
 # CORS: укажи конкретные домены в продакшене!
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=os.getenv("CORS_ORIGINS", FRONTEND_URL).split(",") if os.getenv("CORS_ORIGINS") or FRONTEND_URL else [],
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["GET", "POST", "PATCH"],
     allow_headers=["*"],
