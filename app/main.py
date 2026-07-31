@@ -344,18 +344,98 @@ async def seed_data(session: AsyncSession = Depends(get_db)):
     result = await session.execute(select(Product))
     if result.scalars().first():
         return {"message": "Already seeded"}
-    
+
     products = [
+        # Уход за лицом
         Product(name="Гидрофильное масло", category="Уход за лицом", price=890, old_price=1200,
                 image="https://images.unsplash.com/photo-1620916566398-39f1143ab7be?w=400",
                 description="Глубокое очищение кожи", rating=4.8, reviews_count=124),
         Product(name="Сыворотка с витамином C", category="Уход за лицом", price=1290, old_price=1590,
                 image="https://images.unsplash.com/photo-1608248543803-ba4f8c70ae0b?w=400",
                 description="Осветление и выравнивание тона", rating=4.9, reviews_count=89),
+        Product(name="Крем для лица увлажняющий", category="Уход за лицом", price=750, old_price=950,
+                image="https://images.unsplash.com/photo-1570194065650-d99fb4b38b15?w=400",
+                description="24 часа увлажнения", rating=4.7, reviews_count=156),
+        Product(name="Тоник для лица", category="Уход за лицом", price=450, old_price=600,
+                image="https://images.unsplash.com/photo-1601049541289-9b1b7bbbfe19?w=400",
+                description="Сужение пор и баланс pH", rating=4.6, reviews_count=78),
+        Product(name="Патчи под глаза", category="Уход за лицом", price=590, old_price=790,
+                image="https://images.unsplash.com/photo-1596755389378-c31d21fd1273?w=400",
+                description="Устранение отёков и тёмных кругов", rating=4.5, reviews_count=203),
+        Product(name="Мицеллярная вода", category="Уход за лицом", price=490, old_price=650,
+                image="https://images.unsplash.com/photo-1556228578-0d85b1a4d571?w=400",
+                description="Мягкое очищение без смывания", rating=4.7, reviews_count=312),
+
+        # Макияж
         Product(name="Матовая помада", category="Макияж", price=650, old_price=890,
                 image="https://images.unsplash.com/photo-1586495777744-4413f21062fa?w=400",
                 description="Стойкий цвет на 12 часов", rating=4.7, reviews_count=256),
+        Product(name="Тушь для ресниц", category="Макияж", price=890, old_price=1100,
+                image="https://images.unsplash.com/photo-1631214524115-6f8eb1beb6b5?w=400",
+                description="Объём и удлинение", rating=4.8, reviews_count=312),
+        Product(name="Тональный кушон", category="Макияж", price=1590, old_price=1990,
+                image="https://images.unsplash.com/photo-1596462502278-27bfdc403348?w=400",
+                description="Лёгкое покрытие", rating=4.5, reviews_count=89),
+        Product(name="Палетка теней", category="Макияж", price=1290, old_price=1590,
+                image="https://images.unsplash.com/photo-1596704017254-9b121068fb31?w=400",
+                description="12 оттенков нюд", rating=4.9, reviews_count=178),
+        Product(name="Гель для бровей", category="Макияж", price=450, old_price=590,
+                image="https://images.unsplash.com/photo-1596462502278-27bfdc403348?w=400",
+                description="Фиксация и объём", rating=4.6, reviews_count=134),
+        Product(name="Хайлайтер", category="Макияж", price=790, old_price=990,
+                image="https://images.unsplash.com/photo-1596704017254-9b121068fb31?w=400",
+                description="Сияние кожи", rating=4.8, reviews_count=167),
+
+        # Уход за волосами
+        Product(name="Восстанавливающий шампунь", category="Уход за волосами", price=890, old_price=1100,
+                image="https://images.unsplash.com/photo-1527799820374-dcf8d9d4a388?w=400",
+                description="Для сухих волос", rating=4.6, reviews_count=134),
+        Product(name="Маска для волос", category="Уход за волосами", price=1150, old_price=1390,
+                image="https://images.unsplash.com/photo-1522337360788-8b13dee7a37e?w=400",
+                description="Глубокое питание", rating=4.8, reviews_count=98),
+        Product(name="Масло для волос", category="Уход за волосами", price=690, old_price=850,
+                image="https://images.unsplash.com/photo-1608248543803-ba4f8c70ae0b?w=400",
+                description="Блеск и защита кончиков", rating=4.5, reviews_count=67),
+        Product(name="Термозащитный спрей", category="Уход за волосами", price=550, old_price=720,
+                image="https://images.unsplash.com/photo-1527799820374-dcf8d9d4a388?w=400",
+                description="Защита при укладке", rating=4.4, reviews_count=89),
+
+        # Парфюмерия
+        Product(name="Парфюм Floral", category="Парфюмерия", price=3490, old_price=4200,
+                image="https://images.unsplash.com/photo-1541643600914-78b084683601?w=400",
+                description="Нежный цветочный аромат", rating=4.9, reviews_count=245),
+        Product(name="Парфюм Woody", category="Парфюмерия", price=4290, old_price=5200,
+                image="https://images.unsplash.com/photo-1594035910387-fea47794261f?w=400",
+                description="Древесные ноты", rating=4.8, reviews_count=189),
+        Product(name="Туалетная вода Fresh", category="Парфюмерия", price=2590, old_price=3100,
+                image="https://images.unsplash.com/photo-1596462502278-27bfdc403348?w=400",
+                description="Свежий цитрусовый аромат", rating=4.7, reviews_count=156),
+        Product(name="Масляные духи", category="Парфюмерия", price=1890, old_price=2400,
+                image="https://images.unsplash.com/photo-1541643600914-78b084683601?w=400",
+                description="Стойкий восточный аромат", rating=4.8, reviews_count=112),
+
+        # Уход за телом
+        Product(name="Скраб для тела", category="Уход за телом", price=690, old_price=850,
+                image="https://images.unsplash.com/photo-1556228578-0d85b1a4d571?w=400",
+                description="Кофейный скраб", rating=4.6, reviews_count=112),
+        Product(name="Крем для рук", category="Уход за телом", price=450, old_price=550,
+                image="https://images.unsplash.com/photo-1596755389378-c31d21fd1273?w=400",
+                description="Питательный крем", rating=4.5, reviews_count=89),
+        Product(name="Гель для душа", category="Уход за телом", price=590, old_price=720,
+                image="https://images.unsplash.com/photo-1608248543803-ba4f8c70ae0b?w=400",
+                description="Увлажнение и аромат", rating=4.7, reviews_count=134),
+        Product(name="Масло для тела", category="Уход за телом", price=790, old_price=950,
+                image="https://images.unsplash.com/photo-1601049541289-9b1b7bbbfe19?w=400",
+                description="Питание после душа", rating=4.8, reviews_count=78),
+        Product(name="Дезодорант спрей", category="Уход за телом", price=350, old_price=450,
+                image="https://images.unsplash.com/photo-1556228578-0d85b1a4d571?w=400",
+                description="48 часов защиты", rating=4.4, reviews_count=198),
     ]
+
+    for p in products:
+        session.add(p)
+    await session.commit()
+    return {"message": f"Seeded {len(products)} products"}
     for p in products:
         session.add(p)
     await session.commit()
