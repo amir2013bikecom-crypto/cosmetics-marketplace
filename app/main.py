@@ -1,8 +1,12 @@
 import os
 import logging
+import hashlib
+import hmac
+import json
 from typing import Optional, List
 from datetime import datetime, timezone
 from contextlib import asynccontextmanager
+from urllib.parse import parse_qsl
 
 from fastapi import FastAPI, HTTPException, Header, Request, Depends, status
 from fastapi.middleware.cors import CORSMiddleware
@@ -26,6 +30,8 @@ SELLER_IDS = [int(x.strip()) for x in os.getenv("SELLER_IDS", "").split(",") if 
 SELLER_API_KEY = os.getenv("SELLER_API_KEY", "")
 FRONTEND_URL = os.getenv("FRONTEND_URL", "")
 WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET", "")
+TELEGRAM_AUTH_MAX_AGE_SECONDS = int(os.getenv("TELEGRAM_AUTH_MAX_AGE_SECONDS", "86400"))
+DELIVERY_COSTS = {"courier": 300.0, "sdek": 250.0, "post": 200.0}
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
@@ -96,19 +102,14 @@ async def init_db():
 # ─── PYDANTIC SCHEMAS ───────────────────────────────────────────────
 class OrderItemIn(BaseModel):
     product_id: int
-    product_name: str
     quantity: int = Field(..., ge=1)
-    price: float = Field(..., ge=0)
 
 class OrderCreate(BaseModel):
-    buyer_id: str
     buyer_name: Optional[str] = ""
     buyer_phone: Optional[str] = ""
     buyer_address: Optional[str] = ""
     items: List[OrderItemIn]
-    total: float = Field(..., ge=0)
     delivery_method: Optional[str] = "courier"
-    delivery_cost: Optional[float] = 0.0
 
     @validator("buyer_phone")
     def validate_phone(cls, v):
@@ -117,6 +118,12 @@ class OrderCreate(BaseModel):
         return v
 
 VALID_STATUSES = {"pending", "shipped", "delivered", "cancelled"}
+VALID_STATUS_TRANSITIONS = {
+    "pending": {"shipped", "cancelled"},
+    "shipped": {"delivered", "cancelled"},
+    "delivered": set(),
+    "cancelled": set(),
+}
 
 class StatusUpdate(BaseModel):
     status: str
@@ -193,6 +200,47 @@ async def verify_seller(x_seller_key: Optional[str] = Header(None)):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid seller key")
     return x_seller_key
 
+async def get_telegram_user(
+    x_telegram_init_data: Optional[str] = Header(None),
+) -> dict:
+    if not BOT_TOKEN:
+        raise HTTPException(status_code=503, detail="Telegram authentication is not configured")
+    if not x_telegram_init_data:
+        raise HTTPException(status_code=401, detail="Missing Telegram init data")
+
+    values = dict(parse_qsl(x_telegram_init_data, keep_blank_values=True))
+    received_hash = values.pop("hash", None)
+    if not received_hash or "auth_date" not in values or "user" not in values:
+        raise HTTPException(status_code=401, detail="Invalid Telegram init data")
+
+    data_check_string = "\n".join(f"{key}={values[key]}" for key in sorted(values))
+    secret_key = hmac.new(b"WebAppData", BOT_TOKEN.encode(), hashlib.sha256).digest()
+    expected_hash = hmac.new(secret_key, data_check_string.encode(), hashlib.sha256).hexdigest()
+    if not hmac.compare_digest(expected_hash, received_hash):
+        raise HTTPException(status_code=401, detail="Invalid Telegram init data")
+
+    try:
+        auth_date = int(values["auth_date"])
+        user = json.loads(values["user"])
+    except (TypeError, ValueError, json.JSONDecodeError) as exc:
+        raise HTTPException(status_code=401, detail="Invalid Telegram init data") from exc
+    if datetime.now(timezone.utc).timestamp() - auth_date > TELEGRAM_AUTH_MAX_AGE_SECONDS:
+        raise HTTPException(status_code=401, detail="Telegram session has expired")
+    if "id" not in user:
+        raise HTTPException(status_code=401, detail="Invalid Telegram user")
+    return user
+
+async def verify_seller_or_telegram(
+    x_seller_key: Optional[str] = Header(None),
+    x_telegram_init_data: Optional[str] = Header(None),
+) -> dict:
+    if x_seller_key and SELLER_API_KEY and hmac.compare_digest(x_seller_key, SELLER_API_KEY):
+        return {"id": "service"}
+    telegram_user = await get_telegram_user(x_telegram_init_data)
+    if str(telegram_user["id"]) not in {str(seller_id) for seller_id in SELLER_IDS}:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Seller access required")
+    return telegram_user
+
 # ─── ENDPOINTS ──────────────────────────────────────────────────────
 @app.get("/")
 async def root():
@@ -216,27 +264,52 @@ async def get_categories(session: AsyncSession = Depends(get_db)):
     return [c[0] for c in result.all() if c[0]]
 
 @app.post("/api/v1/orders")
-async def create_order(order: OrderCreate, session: AsyncSession = Depends(get_db)):
+async def create_order(
+    order: OrderCreate,
+    telegram_user: dict = Depends(get_telegram_user),
+    session: AsyncSession = Depends(get_db),
+):
+    if not order.items:
+        raise HTTPException(status_code=422, detail="Order must contain at least one item")
+    if order.delivery_method not in DELIVERY_COSTS:
+        raise HTTPException(status_code=422, detail="Invalid delivery method")
+
+    product_ids = {item.product_id for item in order.items}
+    result = await session.execute(select(Product).where(Product.id.in_(product_ids)))
+    products = {product.id: product for product in result.scalars().all()}
+    missing_ids = product_ids.difference(products)
+    if missing_ids:
+        raise HTTPException(status_code=404, detail=f"Products not found: {sorted(missing_ids)}")
+
+    delivery_cost = DELIVERY_COSTS[order.delivery_method]
+    total = sum(products[item.product_id].price * item.quantity for item in order.items) + delivery_cost
     db_order = Order(
-        buyer_id=order.buyer_id, buyer_name=order.buyer_name,
+        buyer_id=str(telegram_user["id"]), buyer_name=telegram_user.get("first_name", ""),
         buyer_phone=order.buyer_phone, buyer_address=order.buyer_address,
-        total=order.total, status="pending",
+        total=total, status="pending",
         delivery_method=order.delivery_method,
-        delivery_cost=order.delivery_cost
+        delivery_cost=delivery_cost,
     )
     session.add(db_order)
     await session.flush()
     for item in order.items:
         session.add(OrderItem(
             order_id=db_order.id, product_id=item.product_id,
-            product_name=item.product_name, quantity=item.quantity, price=item.price
+            product_name=products[item.product_id].name,
+            quantity=item.quantity, price=products[item.product_id].price,
         ))
     await session.commit()
-    logger.info(f"Order #{db_order.id} created by buyer {order.buyer_id}")
-    return {"success": True, "order_id": db_order.id}
+    logger.info(f"Order #{db_order.id} created by buyer {telegram_user['id']}")
+    return {"success": True, "order_id": db_order.id, "total": total}
 
 @app.get("/api/v1/orders/{buyer_id}")
-async def get_orders(buyer_id: str, session: AsyncSession = Depends(get_db)):
+async def get_orders(
+    buyer_id: str,
+    telegram_user: dict = Depends(get_telegram_user),
+    session: AsyncSession = Depends(get_db),
+):
+    if buyer_id != str(telegram_user["id"]):
+        raise HTTPException(status_code=403, detail="You can only view your own orders")
     result = await session.execute(
         select(Order).where(Order.buyer_id == buyer_id)
         .order_by(desc(Order.created_at))
@@ -258,7 +331,7 @@ async def get_orders(buyer_id: str, session: AsyncSession = Depends(get_db)):
 @app.get("/api/v1/admin/orders")
 async def admin_orders(
     session: AsyncSession = Depends(get_db),
-    _: str = Depends(verify_seller)
+    _: dict = Depends(verify_seller_or_telegram)
 ):
     result = await session.execute(
         select(Order).order_by(desc(Order.created_at)).options(selectinload(Order.items))
@@ -281,12 +354,14 @@ async def update_status(
     order_id: int,
     update: StatusUpdate,
     session: AsyncSession = Depends(get_db),
-    _: str = Depends(verify_seller)
+    _: dict = Depends(verify_seller_or_telegram)
 ):
     result = await session.execute(select(Order).where(Order.id == order_id))
     order = result.scalar_one_or_none()
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
+    if update.status not in VALID_STATUS_TRANSITIONS[order.status]:
+        raise HTTPException(status_code=409, detail=f"Cannot change {order.status} order to {update.status}")
     order.status = update.status
     await session.commit()
     logger.info(f"Order #{order_id} status updated to {update.status}")
@@ -297,12 +372,14 @@ async def update_track(
     order_id: int,
     update: TrackUpdate,
     session: AsyncSession = Depends(get_db),
-    _: str = Depends(verify_seller)
+    _: dict = Depends(verify_seller_or_telegram)
 ):
     result = await session.execute(select(Order).where(Order.id == order_id))
     order = result.scalar_one_or_none()
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
+    if "shipped" not in VALID_STATUS_TRANSITIONS[order.status]:
+        raise HTTPException(status_code=409, detail=f"Cannot ship {order.status} order")
     order.track_number = update.track_number
     order.status = "shipped"
     await session.commit()
@@ -310,10 +387,17 @@ async def update_track(
     return {"success": True, "order_id": order.id, "track_number": order.track_number}
 
 @app.post("/api/v1/reviews")
-async def create_review(review: ReviewCreate, session: AsyncSession = Depends(get_db)):
+async def create_review(
+    review: ReviewCreate,
+    telegram_user: dict = Depends(get_telegram_user),
+    session: AsyncSession = Depends(get_db),
+):
+    product = await session.get(Product, review.product_id)
+    if not product:
+        raise HTTPException(status_code=404, detail="Product not found")
     db_review = Review(
-        product_id=review.product_id, buyer_id=review.buyer_id,
-        buyer_name=review.buyer_name, rating=review.rating, text=review.text
+        product_id=review.product_id, buyer_id=str(telegram_user["id"]),
+        buyer_name=telegram_user.get("first_name", ""), rating=review.rating, text=review.text
     )
     session.add(db_review)
     await session.commit()
@@ -345,7 +429,10 @@ async def telegram_webhook(request: Request):
     return {"ok": True}
 
 @app.post("/api/v1/seed")
-async def seed_data(session: AsyncSession = Depends(get_db)):
+async def seed_data(
+    session: AsyncSession = Depends(get_db),
+    _: dict = Depends(verify_seller_or_telegram),
+):
     result = await session.execute(select(Product))
     if result.scalars().first():
         return {"message": "Already seeded"}
