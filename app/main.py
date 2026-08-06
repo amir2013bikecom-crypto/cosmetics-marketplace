@@ -116,7 +116,7 @@ class OrderCreate(BaseModel):
             raise ValueError("Некорректный номер телефона")
         return v
 
-VALID_STATUSES = {"pending", "shipped", "delivered", "cancelled"}
+VALID_STATUSES = {"pending", "shipped", "delivered", "cancelled", "received"}
 
 class StatusUpdate(BaseModel):
     status: str
@@ -276,6 +276,14 @@ async def admin_orders(
                    "quantity": i.quantity, "price": i.price} for i in o.items]
     } for o in orders]
 
+async def send_telegram_message(buyer_id: str, text: str):
+    if not bot_app:
+        return
+    try:
+        await bot_app.bot.send_message(chat_id=int(buyer_id), text=text, parse_mode="HTML")
+    except Exception as e:
+        logger.warning(f"Failed to send message to {buyer_id}: {e}")
+
 @app.patch("/api/v1/orders/{order_id}/status")
 async def update_status(
     order_id: int,
@@ -287,8 +295,25 @@ async def update_status(
     order = result.scalar_one_or_none()
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
+    
+    old_status = order.status
     order.status = update.status
     await session.commit()
+    
+    # Push-уведомление покупателю
+    if update.status == "shipped" and old_status != "shipped":
+        msg = f"🚚 <b>Заказ #{order.id} отправлен!</b>\n\n"
+        if order.track_number:
+            msg += f"Трек-номер: <code>{order.track_number}</code>\n"
+        msg += f"Способ: {order.delivery_method}\n"
+        msg += f"Сумма: {order.total} ₽"
+        await send_telegram_message(order.buyer_id, msg)
+    
+    if update.status == "delivered" and old_status != "delivered":
+        msg = f"📦 <b>Заказ #{order.id} доставлен!</b>\n\n"
+        msg += "Откройте приложение и нажмите «Подтвердить получение»"
+        await send_telegram_message(order.buyer_id, msg)
+    
     logger.info(f"Order #{order_id} status updated to {update.status}")
     return {"success": True, "order_id": order.id, "status": order.status}
 
@@ -306,8 +331,40 @@ async def update_track(
     order.track_number = update.track_number
     order.status = "shipped"
     await session.commit()
+    
+    # Push-уведомление
+    msg = f"🚚 <b>Заказ #{order.id} отправлен!</b>\n\n"
+    msg += f"Трек-номер: <code>{order.track_number}</code>\n"
+    msg += f"Способ: {order.delivery_method}\n"
+    msg += f"Сумма: {order.total} ₽"
+    await send_telegram_message(order.buyer_id, msg)
+    
     logger.info(f"Order #{order_id} track updated: {update.track_number}")
     return {"success": True, "order_id": order.id, "track_number": order.track_number}
+    @app.patch("/api/v1/orders/{order_id}/receive")
+async def confirm_received(
+    order_id: int,
+    session: AsyncSession = Depends(get_db)
+):
+    result = await session.execute(select(Order).where(Order.id == order_id))
+    order = result.scalar_one_or_none()
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+    order.status = "received"
+    await session.commit()
+    
+    # Уведомление продавцам
+    for seller_id in SELLER_IDS:
+        try:
+            await bot_app.bot.send_message(
+                chat_id=seller_id,
+                text=f"✅ <b>Заказ #{order.id} получен покупателем!</b>\n\n{order.buyer_name or 'Покупатель'} подтвердил получение."
+            )
+        except Exception as e:
+            logger.warning(f"Failed to notify seller {seller_id}: {e}")
+    
+    logger.info(f"Order #{order_id} confirmed received by buyer")
+    return {"success": True, "order_id": order.id, "status": "received"}
 
 @app.post("/api/v1/reviews")
 async def create_review(review: ReviewCreate, session: AsyncSession = Depends(get_db)):
