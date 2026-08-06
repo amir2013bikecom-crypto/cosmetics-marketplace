@@ -229,6 +229,10 @@ async def send_telegram_message(buyer_id: str, text: str):
         logger.warning(f"Failed to send message to {buyer_id}: {e}")
 
 # ========== ENDPOINTS ==========
+@app.get("/")
+async def root():
+    return {"status": "ok", "service": "Cosmetics Marketplace API"}
+
 @app.get("/health")
 async def health():
     return True
