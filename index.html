@@ -217,6 +217,12 @@ async function api(path, opts) {
   return await res.json();
 }
 
+function escapeHtml(value) {
+  return String(value ?? '').replace(/[&<>'"]/g, character => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;'
+  })[character]);
+}
+
 function showToast(msg) {
   const c = document.getElementById('toastContainer');
   const d = document.createElement('div');
@@ -377,18 +383,19 @@ function switchTab(tab) {
 
 function getDeliveryCost() {
   const m = document.querySelector('input[name="delivery"]:checked');
-  return m ? { courier: 300, sdek: 250, post: 200 }[m.value] || 0 : 0;
+  return m ? { courier: 300, sdek: 250, ozon: 199 }[m.value] || 0 : 0;
 }
 
 function getDeliveryLabel() {
   const m = document.querySelector('input[name="delivery"]:checked');
-  return m ? { courier: 'Курьер по Махачкале', sdek: 'СДЭК (по России)', post: 'Почта России' }[m.value] || 'Доставка' : 'Доставка';
+  if (m && m.value === 'ozon') return 'Ozon Доставка';
+  return m ? { courier: 'Курьер по Махачкале', sdek: 'СДЭК (по России)' }[m.value] || 'Доставка' : 'Доставка';
 }
 
 function updateDelivery() {
   const cost = getDeliveryCost();
   const subtotal = cart.reduce((s, c) => s + c.price * c.qty, 0);
-  const total = subtotal + cost;
+  const total = Math.max(0, subtotal - subtotal * promoDiscount / 100) + cost;
   const totalEl = document.getElementById('cartTotal');
   if (totalEl) totalEl.innerText = Math.round(total).toLocaleString('ru-RU') + ' ₽';
   document.querySelectorAll('.delivery-option').forEach(l => l.classList.remove('active'));
@@ -398,6 +405,11 @@ function updateDelivery() {
   const label = document.getElementById('deliveryAddressLabel');
   if (!addr || !label) return;
   const method = checked ? checked.value : 'courier';
+  if (method === 'ozon') {
+    addr.placeholder = 'Город, адрес или номер пункта выдачи Ozon';
+    label.innerText = 'Пункт выдачи Ozon';
+    return;
+  }
   if (method === 'courier') {
     addr.placeholder = 'Улица, дом, квартира (Махачкала)';
     label.innerText = 'Адрес доставки (Махачкала)';
@@ -446,7 +458,7 @@ function renderCartPage() {
   html += '<div class="delivery-title">🚚 Способ доставки</div>';
   html += '<label class="delivery-option active"><input type="radio" name="delivery" value="courier" checked onchange="updateDelivery()"><div class="delivery-info"><div class="delivery-name">Курьер по Махачкале</div><div class="delivery-desc">Доставка 1–2 часа</div></div><div class="delivery-price">300 ₽</div></label>';
   html += '<label class="delivery-option"><input type="radio" name="delivery" value="sdek" onchange="updateDelivery()"><div class="delivery-info"><div class="delivery-name">СДЭК (по России)</div><div class="delivery-desc">Пункт выдачи или курьер, 3–5 дней</div></div><div class="delivery-price">250 ₽</div></label>';
-  html += '<label class="delivery-option"><input type="radio" name="delivery" value="post" onchange="updateDelivery()"><div class="delivery-info"><div class="delivery-name">Почта России</div><div class="delivery-desc">До отделения, 5–7 дней</div></div><div class="delivery-price">200 ₽</div></label>';
+  html += '<label class="delivery-option"><input type="radio" name="delivery" value="ozon" onchange="updateDelivery()"><div class="delivery-info"><div class="delivery-name">Ozon Доставка</div><div class="delivery-desc">Пункт выдачи, 2–5 дней</div></div><div class="delivery-price">199 ₽</div></label>';
   html += '</div>';
   html += '<div class="checkout-form">';
   html += '<div class="form-group"><label id="deliveryAddressLabel">Адрес доставки (Махачкала)</label><input type="text" id="addressInput" placeholder="Улица, дом, квартира (Махачкала)"></div>';
@@ -491,20 +503,15 @@ async function checkout() {
   const address = document.getElementById('addressInput').value.trim();
   const phone = document.getElementById('phoneInput').value.trim();
   if (!address || !phone) { tg.showAlert('Заполните адрес и телефон'); return; }
-  const items = cart.map(c => ({ product_id: c.id, product_name: c.name, quantity: c.qty, price: c.price }));
-  const userName = (tg.initDataUnsafe && tg.initDataUnsafe.user) ? (tg.initDataUnsafe.user.first_name || 'Покупатель') : 'Покупатель';
+  const items = cart.map(c => ({ product_id: c.id, quantity: c.qty }));
   const deliveryMethod = document.querySelector('input[name="delivery"]:checked').value;
-  const deliveryCost = getDeliveryCost();
-  const subtotal = cart.reduce((s, c) => s + c.price * c.qty, 0);
-  const total = subtotal + deliveryCost;
   try {
     const res = await api('/orders/', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        buyer_id: userId, buyer_name: userName, buyer_phone: phone, buyer_address: address,
-        items: items, total: total, promo_code: document.getElementById('promoInput').value.trim(),
-        delivery_method: deliveryMethod, delivery_cost: deliveryCost
+        buyer_phone: phone, buyer_address: address, items: items,
+        promo_code: document.getElementById('promoInput').value.trim(), delivery_method: deliveryMethod
       })
     });
     tg.showAlert('Заказ оформлен! Номер: ' + res.order_id);
@@ -525,7 +532,7 @@ async function renderOrdersPage() {
     }
     const statusMap = { pending: 'Ожидает', processing: 'В обработке', shipped: 'Отправлен', delivered: 'Доставлен', cancelled: 'Отменён', received: 'Получен' };
     const cssMap = { pending: 'status-pending', processing: 'status-processing', shipped: 'status-shipped', delivered: 'status-delivered', cancelled: 'status-cancelled', received: 'status-received' };
-    const deliveryLabelMap = { courier: 'Курьер по Махачкале', sdek: 'СДЭК', post: 'Почта России' };
+    const deliveryLabelMap = { courier: 'Курьер по Махачкале', sdek: 'СДЭК', ozon: 'Ozon Доставка' };
     let html = '<h2 class="section-title">Мои заказы</h2>';
     orders.forEach(o => {
       html += '<div class="order-card">';
@@ -595,7 +602,7 @@ async function openReviews(productId, productName) {
     html += '<button style="position:sticky;top:10px;left:10px;z-index:501;padding:8px 14px;border:none;background:#1A1A1A;color:#fff;border-radius:8px;cursor:pointer;margin-bottom:12px;" onclick="document.getElementById(\'reviewOverlay\').remove()">Закрыть</button>';
     html += '<h2 style="font-family:Playfair Display,serif;margin-bottom:16px;">Отзывы: ' + productName + '</h2>';
     if (!reviews.length) html += '<div style="color:#888;margin-top:8px">Пока нет отзывов</div>';
-    else html += reviews.map(r => '<div class="review-item"><div class="author">' + (r.buyer_name || 'Покупатель') + ' ' + '★'.repeat(r.rating) + '☆'.repeat(5 - r.rating) + '</div><div class="text">' + r.text + '</div></div>').join('');
+    else html += reviews.map(r => '<div class="review-item"><div class="author">' + escapeHtml(r.buyer_name || 'Покупатель') + ' ' + '★'.repeat(r.rating) + '☆'.repeat(5 - r.rating) + '</div><div class="text">' + escapeHtml(r.text) + '</div></div>').join('');
     html += '<div style="margin-top:20px;padding:16px;background:#F2F2F7;border-radius:12px;">';
     html += '<h4 style="margin-bottom:12px;">Оставить отзыв</h4>';
     html += '<div class="stars" id="starBox" style="margin-bottom:12px;">';
@@ -665,7 +672,7 @@ updateBadges();
       const statusMap = { pending: 'Ожидает', processing: 'В обработке', shipped: 'Отправлен', delivered: 'Доставлен', cancelled: 'Отменён', received: 'Получен' };
       const statusColors = { pending: '#856404', processing: '#0C5460', shipped: '#155724', delivered: '#155724', cancelled: '#721C24', received: '#004085' };
       const statusBg = { pending: '#FFF3CD', processing: '#D1ECF1', shipped: '#D4EDDA', delivered: '#D4EDDA', cancelled: '#F8D7DA', received: '#CCE5FF' };
-      const deliveryLabelMap = { courier: 'Курьер Махачкала', sdek: 'СДЭК', post: 'Почта России' };
+      const deliveryLabelMap = { courier: 'Курьер Махачкала', sdek: 'СДЭК', ozon: 'Ozon Доставка' };
       if (!orders || !orders.length)
         return '<div class="page"><h2 class="section-title">Заказы</h2><div class="empty-state"><h3>Нет заказов</h3></div></div>';
       let html = '<div class="page">';
@@ -682,9 +689,9 @@ updateBadges();
         html += '<span class="order-status" style="background:' + (statusBg[o.status] || '#eee') + ';color:' + (statusColors[o.status] || '#333') + '">' + (statusMap[o.status] || o.status) + '</span>';
         html += '</div>';
         html += '<div class="order-items">' + (items || 'Товары не указаны') + '</div>';
-        html += '<div style="font-size:13px;color:#8E8E93;margin-bottom:4px">' + (o.buyer_name || '') + ' | ' + (o.buyer_phone || '') + '</div>';
+        html += '<div style="font-size:13px;color:#8E8E93;margin-bottom:4px">' + escapeHtml(o.buyer_name) + ' | ' + escapeHtml(o.buyer_phone) + '</div>';
         html += '<div style="font-size:13px;color:#8E8E93;margin-bottom:4px">' + (deliveryLabelMap[o.delivery_method] || 'Доставка') + ': ' + (o.delivery_cost || 0) + ' ₽</div>';
-        html += '<div style="font-size:13px;color:#8E8E93;margin-bottom:12px">' + (o.buyer_address || '') + '</div>';
+        html += '<div style="font-size:13px;color:#8E8E93;margin-bottom:12px">' + escapeHtml(o.buyer_address) + '</div>';
         html += '<div class="order-total">' + o.total + ' ₽</div>';
         if (o.track_number) html += '<div style="font-size:13px;color:#C9A96E;margin-top:4px">🚚 Трек: ' + o.track_number + '</div>';
         html += '<div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap">';
@@ -777,12 +784,12 @@ updateBadges();
     },
 
     shipOrder: function (orderId) {
-      const track = prompt('Введите трек-номер (можно оставить пустым):');
-      if (track === null) return;
+      const track = prompt('Введите трек-номер:');
+      if (track === null || !track.trim()) { tg.showAlert('Введите трек-номер'); return; }
       fetch(API_BASE + '/api/v1/orders/' + orderId + '/track', {
         method: 'PATCH',
         headers: Object.assign({ 'Content-Type': 'application/json' }, telegramAuthHeaders()),
-        body: JSON.stringify({ track_number: track || '' })
+        body: JSON.stringify({ track_number: track.trim() })
       })
         .then(function (res) { if (res.ok) { Admin.loadOrders(); } else { tg.showAlert('Ошибка обновления трека'); } })
         .catch(function (e) { tg.showAlert('Ошибка сервера'); });
